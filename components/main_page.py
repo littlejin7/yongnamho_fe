@@ -18,7 +18,7 @@ import streamlit as st
 from categories import accent_color_for_row, resolve_row_categories
 
 SENT_LABEL = {"positive": "긍정", "neutral": "중립", "negative": "부정"}
-
+TITLE_IMG = Path(__file__).resolve().parent / "assets" / "title.png"
 
 # ── TTS ──────────────────────────────────────────────────────────────────────
 
@@ -98,20 +98,19 @@ def _match(item: dict, keyword: str, major: str, sub: str, sentiments: list[str]
 
 def render_header():
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    st.markdown(f"""
-    <div style="display:flex;align-items:flex-end;justify-content:space-between;
-        margin-bottom:8px;padding-bottom:12px;border-bottom:2px solid #2c1810;">
-      <div>
-        <div style="font-size:36px;font-weight:900;color:#2c1810;
-            font-family:'Noto Serif KR',serif;letter-spacing:-1px;line-height:1.1;">
-            제목 설정 
-        </div>
-        <div style="font-size:14px;color:#8b7355;margin-top:2px;">부제 설정</div>
-      </div>
-      <div class="date-badge">📅 {today}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
+    
+    # 날짜 오른쪽 정렬
+    st.markdown(
+        f'<div style="text-align:right;"><span class="date-badge">📅 {today}</span></div>',
+        unsafe_allow_html=True
+    )
+    
+    # 이미지 가운데 정렬
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.image(str(TITLE_IMG), use_container_width=True)  # 크기 크게
+    
+    st.markdown('<hr style="border:none;border-top:2px solid #2c1810;margin:8px 0 12px;">', unsafe_allow_html=True)
 
 # ── 메트릭 카드 ───────────────────────────────────────────────────────────────
 
@@ -204,15 +203,11 @@ def render_ranking(filtered: list):
             </div>
             """, unsafe_allow_html=True)
 
-            # 버튼 2개 (카드 안)
-            b1, b2 = st.columns(2)
-            with b1:
-                if st.button("📄 상세보기", key=f"detail_1_{featured['id']}", use_container_width=True):
-                    st.session_state["detail_id"] = featured["id"]
-                    st.switch_page("pages/dashboard.py")
-            with b2:
-                if featured.get("url"):
-                    st.link_button("🔗 원문", featured["url"], use_container_width=True)
+        
+            if st.button("📄 상세보기", key=f"detail_1_{featured['id']}", use_container_width=True):
+                st.session_state["detail_id"] = featured["id"]
+                st.switch_page("pages/dashboard.py")
+
 
     # ── 2위~10위 랭킹 카드 그리드 ────────────────────
     with right:
@@ -257,15 +252,11 @@ def render_ranking(filtered: list):
                     </div>
                     """, unsafe_allow_html=True)
 
-                    # 상세보기 + 원문 버튼 (카드 안)
-                    b1, b2 = st.columns(2)
-                    with b1:
-                        if st.button("📄 상세보기", key=f"detail_{rank}_{item['id']}", use_container_width=True):
-                            st.session_state["detail_id"] = item["id"]
-                            st.switch_page("pages/dashboard.py")
-                    with b2:
-                            if item.get("url"):
-                                st.link_button("🔗 원문", item["url"], use_container_width=True)
+                
+                    if st.button("📄 상세보기", key=f"detail_{rank}_{item['id']}", use_container_width=True):
+                       st.session_state["detail_id"] = item["id"]
+                       st.switch_page("pages/dashboard.py")
+
 
 
 # ── 감성 추이 차트 ────────────────────────────────────────────────────────────
