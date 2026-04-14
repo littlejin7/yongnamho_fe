@@ -13,9 +13,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import streamlit as st
-from styles import apply_styles
+from components.styles import apply_styles
 from components.sidebar import render_sidebar
-from components.dashboard import render_dashboard
+from components.main_page import render_dashboard
 
 DB_PATH = Path("k_enter_news.db")
 
@@ -87,11 +87,12 @@ def load_processed():
 def load_past():
     con = _open()
     cur = con.cursor()
+    # 1. 쿼리에서는 thumbnail_url을 뺐습니다.
     cur.execute("""
         SELECT
             id, processed_news_id, artist_name, title, url, summary,
             relation_type, relevance_score, sentiment, category,
-            source_name, published_at, thumbnail_url
+            source_name, published_at
         FROM past_news
         ORDER BY id DESC
     """)
@@ -111,11 +112,9 @@ def load_past():
             "category": r["category"] or "기타",
             "source_name": r["source_name"] or "",
             "published_at": r["published_at"] or "",
-            "thumbnail_url": r["thumbnail_url"] or "",
         }
         for r in rows
     ]
-
 
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 

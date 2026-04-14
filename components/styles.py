@@ -14,6 +14,9 @@ html, body, [class*="css"] {
     font-family: 'Noto Sans KR', sans-serif;
 }
 
+/* ── 사이드바 자동 네비게이션 숨기기 ────────────────── */
+[data-testid="stSidebarNav"] { display: none !important; }                
+
 /* ── 메인 배경 ───────────────────────────────────── */
 .stApp { background-color: #f5f0e8; color: #2c1810; }
 .main  { background-color: #f5f0e8; }
@@ -141,6 +144,25 @@ img { border-radius: 8px; }
     padding: 14px 16px;
     margin-bottom: 10px;
     transition: border-color 0.2s, box-shadow 0.2s;
+}
+/* 썸네일 */
+.news-thumb, .featured-thumb {
+    width: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    border: 1px solid #d4c4a8;
+    background: #f5f0e8;
+}
+
+.news-thumb {
+    height: 140px;
+}
+
+.featured-thumb {
+    height: 220px;
 }
 .news-card:hover {
     border-color: #8b4513;
