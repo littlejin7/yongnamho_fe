@@ -39,7 +39,7 @@ client = OpenAI(
     api_key="ollama",           # Ollama는 키 불필요
     base_url="http://localhost:11434/v1",
 )
-LLM_MODEL = "gemma4:27b"       # 또는 "gemma4"
+LLM_MODEL = "gemma4:latest"       # 또는 "gemma4"
 LLM_DELAY = 2
 
 
@@ -93,16 +93,9 @@ SYSTEM_PROMPT = """너는 K-엔터테인먼트 뉴스 분석 전문가야.
 - tts_text: 한국어 라디오 앵커 톤. 숫자는 읽기 좋게 한글 혼합 표기 가능.
 - briefing 필드는 출력하지 않는다."""
 
-# processor.py 변경
-LLM_MODEL = "gemma4"  # Ollama 로컬 실행 시
-
-# 또는 26B 버전
-LLM_MODEL = "gemma4:27b"
-LLM_DELAY = 2
 
 
-
-#스키마 컬럼은 schemas의 summary_to_processed_payload로 옮겼습니다.
+# 스키마 컬럼은 schemas의 summary_to_processed_payload로 옮겼습니다.
 def process_single(raw: RawNews) -> dict:
     content = (raw.content or "")[:3000]
 
@@ -119,7 +112,7 @@ URL: {raw.url or ""}
         temperature=0.3,
         timeout=60,
         response_format={"type": "json_object"},
-        extra_body={"keep_alive":},   #멘토님 추천옵션
+        extra_body={"keep_alive":0},   #멘토님 추천옵션
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},

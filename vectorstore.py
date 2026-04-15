@@ -3,22 +3,23 @@
 
 역할:
   스크립트 실행 시: k_enter_news.db → 임베딩 → ChromaDB 저장 (2개 collection)
-  get_stores()       : 저장된 벡터스토어 불러오기
-  enrich_recent_with_past() : 최신 ��스로 과거 뉴스 유사도 검색
+  get_stores()     : 저장된 벡터스토어 불러오기
 """
-
+import os
 import sqlite3
 import json
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
-EMBED_MODEL = "intfloat/multilingual-e5-base"
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
+EMBED_MODEL = "Snowflake/snowflake-arctic-embed-m"
 CHROMA_DIR = "./chroma_db"
 
 
 # ═══════════════════════════════════════════════════
-# 유사도 검색 헬퍼 (다른 모듈에서 import)
+# 벡터스토어 로드 (다른 모듈에서 import)
 # ═══════════════════════════════════════════════════
 
 def get_stores():
@@ -35,13 +36,6 @@ def get_stores():
         persist_directory=CHROMA_DIR,
     )
     return recent, past
-
-
-def enrich_recent_with_past(recent_doc: Document, past_store: Chroma, k: int = 3):
-    """최신 뉴스 1건 → past_news에서 유사한 과거 뉴스 k건 검색"""
-    return past_store.similarity_search_with_score(
-        recent_doc.page_content, k=k
-    )
 
 
 # ═══════════════════════════════════════════════════
@@ -78,15 +72,15 @@ def build_and_save():
         doc = Document(
             page_content=content,
             metadata={
-                "id": row["id"],
-                "raw_news_id": row["raw_news_id"],
-                "category": row["category"],
-                "sentiment": row["sentiment"],
-                "sentiment_score": row["sentiment_score"],
-                "source": row["source_name"],
-                "url": row["url"],
-                "processed_at": row["processed_at"],
-            },
+                "id": row["id"] or 0,
+                "raw_news_id": row["raw_news_id"] or 0,
+                "category": row["category"] or "",
+                "sentiment": row["sentiment"] or "",
+                "sentiment_score": row["sentiment_score"] or 0.0,
+                "source": row["source_name"] or "",
+                "url": row["url"] or "",
+                "processed_at": str(row["processed_at"]) if row["processed_at"] else "",
+            },  
         )
         recent_docs.append(doc)
 
@@ -117,19 +111,19 @@ def build_and_save():
         doc = Document(
             page_content=content,
             metadata={
-                "id": row["id"],
-                "processed_news_id": row["processed_news_id"],
-                "artist_name": row["artist_name"],
-                "artist_type": row["artist_type"],
-                "artist_agency": row["artist_agency"],
-                "category": row["category"],
-                "sentiment": row["sentiment"],
-                "sentiment_score": row["sentiment_score"],
-                "relevance_score": row["relevance_score"],
-                "relation_type": row["relation_type"],
-                "source": row["source_name"],
-                "url": row["url"],
-                "published_at": row["published_at"],
+                "id": row["id"] or 0,
+                "processed_news_id": row["processed_news_id"] or 0,
+                "artist_name": row["artist_name"] or "",
+                "artist_type": row["artist_type"] or "",
+                "artist_agency": row["artist_agency"] or "",
+                "category": row["category"] or "",
+                "sentiment": row["sentiment"] or "",
+                "sentiment_score": row["sentiment_score"] or 0.0,
+                "relevance_score": row["relevance_score"] or 0.0,
+                "relation_type": row["relation_type"] or "",
+                "source": row["source_name"] or "",
+                "url": row["url"] or "",
+                "published_at": str(row["published_at"]) if row["published_at"] else "",
             },
         )
         past_docs.append(doc)
