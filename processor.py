@@ -1,9 +1,12 @@
 """
-03.processor.py — LLM 가공 + 이미지 수집 통합
+03.processor.py — LLM 가공 + 최신 뉴스 이미지 수집
 
 역할:
-  process_and_save()  : raw_news → LLM 가공 → processed_news 저장
-  fetch_all_images()  : processed_news + past_news 썸네일 이미지 수집
+  process_and_save()              : raw_news → LLM 가공 → processed_news 저장
+  fetch_processed_images_only()   : processed_news 썸네일만 수집
+
+주의:
+  - past_news에는 이미지를 저장하지 않음
 """
 
 import os
@@ -16,47 +19,90 @@ from playwright.sync_api import sync_playwright
 from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 from openai import OpenAI
-
-from database import RawNews, ProcessedNews, PastNews, get_session
+from pydantic import ValidationError
+from schemas import KpopNewsSummary, summary_to_processed_payload, EnglishSummaryCard, KoreanSummaryCard
+from database import RawNews, ProcessedNews, get_session
 
 
 # ═══════════════════════════════════════════════════
 # Part 1: LLM 가공 (raw_news → processed_news)
 # ═══════════════════════════════════════════════════
 
+
+#26.4.15 기준 주석처리 (용남님쓰던거)
+# client = OpenAI(
+#     api_key=os.getenv("OPENROUTER_API_KEY"),
+#     base_url="https://openrouter.ai/api/v1",
+#)
+
 client = OpenAI(
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1",
+    api_key="ollama",           # Ollama는 키 불필요
+    base_url="http://localhost:11434/v1",
 )
-
-SYSTEM_PROMPT = """너는 K-엔터테인먼트 뉴스 분석 전문가야.
-주어진 뉴스 기사를 분석해서 아래 JSON 형식으로만 응답해. 다른 텍스트는 절대 포함하지 마.
-
-{
-  "summary": "핵심 내용 3줄 이내 요약",
-  "category": "아이돌 | 드라마 | 영화 | 글로벌 중 택1",
-  "sentiment": "positive | negative | neutral 중 택1",
-  "sentiment_score": 0.82,
-  "keywords": ["키워드1", "키워드2", "키워드3"],
-  "artist_tags": ["아티스트1", "아티스트2"],
-  "source_name": "출처 사이트명",
-  "tts_text": "라디오 앵커가 읽는 것처럼 자연스러운 브리핑 2~3문장"
-}
-
-규칙:
-- summary: 핵심 내용을 5줄 이내로 요약
-- category: "아이돌", "드라마", "영화", "글로벌" 중 가장 적합한 것 택1
-- sentiment: 기사 논조가 긍정이면 "positive", 부정이면 "negative", 중립이면 "neutral"
-- sentiment_score: 0.0(매우 부정) ~ 1.0(매우 긍정) 사이 소수점
-- keywords: 기사의 핵심 키워드 3~5개
-- artist_tags: 기사에 등장하는 아티스트/배우/인물 이름들 (없으면 빈 리스트)
-- source_name: URL에서 출처 사이트명 추출 (예: "위버스", "빌보드")
-- tts_text: 라디오 뉴스 앵커가 읽는 것처럼 자연스러운 브리핑 2~3문장"""
-
-LLM_MODEL = "google/gemini-2.5-flash"
+LLM_MODEL = "gemma4:27b"       # 또는 "gemma4"
 LLM_DELAY = 2
 
 
+#채은님이 시스템프롬프트 줄예정
+
+SYSTEM_PROMPT = """너는 K-엔터테인먼트 뉴스 분석 전문가야.
+주어진 뉴스 기사만 근거로, 아래 JSON 객체 하나만 출력한다. JSON 바깥 텍스트/설명/마크다운/코드펜스 금지.
+
+{
+  "summary": [
+    {"label": "핵심사실", "content": "본문 근거 한 줄 존댓말"},
+    {"label": "맥락배경", "content": "..."},
+    {"label": "영향범위", "content": "..."},
+    {"label": "추가쟁점", "content": "..."}
+  ],
+  "summary_en": [
+    {"label": "Key fact", "content": "One complete English sentence."},
+    {"label": "Context", "content": "..."},
+    {"label": "Impact", "content": "..."},
+    {"label": "Extra angle", "content": "..."}
+  ],
+  "artist_tags": ["본문에 실제 등장한 인물·그룹명, 없으면 []"],
+  "keywords": ["비인명 키워드만 정확히 5개"],
+  "sub_category": "아래 허용 목록 중 정확히 1개",
+  "category": "sub_category 와 동일한 문자열(레거시 호환)",
+  "sentiment": "긍정|부정|중립 중 하나(한글)",
+  "sentiment_score": null,
+  "importance": 1,
+  "importance_reason": "[IP0+사건0+파급0+기본1=1] 근거 한 문장",
+  "trend_insight": "유진님이 만들꺼야",
+  "source_name": "출처 사이트명(예: 빌보드, 위버스)",
+  "tts_text": "한국어 구어체 라디오 브리핑 150~220자 권장. URL/해시태그/이모지/마크다운 금지."
+}
+
+[필드 규칙]
+- summary / summary_en: 각각 '요약 카드' 배열. 정확히 4~6개(동일 개수). 순서 1:1 대응. (위 JSON 예시는 최소 4개; 기사에 맞으면 5~6개까지.)
+  - summary: label 2~10자 한글 명사구, content 본문 근거 한 줄(존댓말). 카드끼리 중복·복붙 금지.
+  - summary_en: label 2~30자 영어, content 영어 한 문장. i번째 카드는 i번째 한국어 카드와 같은 초점.
+- artist_tags: 제목/본문에 실제로 나온 이름만. 없으면 [].
+- keywords: 정확히 5개. artist_tags 인명/그룹명은 넣지 말고 테마·형식·행사·차트 등 비인명만.
+- sub_category: 아래 중 정확히 하나만(오타·영문 라벨 금지).
+  음악/차트, 앨범/신곡, 콘서트/투어, 드라마/방송, 예능/방송, 공연/전시, 영화/OTT,
+  팬덤/SNS, 스캔들/논란, 인사/동정, 미담/기부, 연애/결혼, 입대/군복무,
+  산업/기획사, 해외반응, 마케팅/브랜드, 행사/이벤트, 기타
+- category: 반드시 sub_category 와 같은 문자열.
+- sentiment: 반드시 한글 "긍정" 또는 "부정" 또는 "중립".
+- sentiment_score: 항상 null.
+- importance: 1~10 정수.
+- importance_reason: `[IPa+사건b+파급c+기본1=총점]` 형식. a,b,c는 0~3 정수, 총점=a+b+c+1 이고 importance 와 일치.
+- trend_insight: 유진님이만들꺼야
+- tts_text: 한국어 라디오 앵커 톤. 숫자는 읽기 좋게 한글 혼합 표기 가능.
+- briefing 필드는 출력하지 않는다."""
+
+# processor.py 변경
+LLM_MODEL = "gemma4"  # Ollama 로컬 실행 시
+
+# 또는 26B 버전
+LLM_MODEL = "gemma4:27b"
+LLM_DELAY = 2
+
+
+
+#스키마 컬럼은 schemas의 summary_to_processed_payload로 옮겼습니다.
 def process_single(raw: RawNews) -> dict:
     content = (raw.content or "")[:3000]
 
@@ -73,28 +119,31 @@ URL: {raw.url or ""}
         temperature=0.3,
         timeout=60,
         response_format={"type": "json_object"},
+        extra_body={"keep_alive":},   #멘토님 추천옵션
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
     )
 
-    result = json.loads(response.choices[0].message.content)
+    raw_text = response.choices[0].message.content or ""
 
-    return {
-        "raw_news_id": raw.id,
-        "category": result.get("category", ""),
-        "summary": result.get("summary", ""),
-        "keywords": result.get("keywords", []),
-        "sentiment": result.get("sentiment", ""),
-        "sentiment_score": result.get("sentiment_score", 0.0),
-        "artist_tags": result.get("artist_tags", []),
-        "tts_text": result.get("tts_text", ""),
-        "source_name": result.get("source_name", ""),
-        "url": raw.url or "",
-        "processed_at": datetime.now(),
-    }
+    try:
+        result = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"LLM JSON 파싱 실패 (raw_news_id={raw.id})") from e
 
+    try:
+        validated = KpopNewsSummary(**result)
+    except ValidationError as e:
+        raise ValueError(
+            f"LLM 스키마 검증 실패 (raw_news_id={raw.id}): {e.errors()} | raw_text={raw_text[:500]}"
+        ) from e
+    
+    payload = summary_to_processed_payload(raw.id, validated)
+    payload["url"] = raw.url or ""
+    payload["processed_at"] = datetime.now()
+    return payload
 
 def process_and_save(session, batch_size: int = 50) -> int:
     """미처리된 raw_news를 LLM으로 가공 → processed_news에 저장"""
@@ -180,6 +229,7 @@ def _is_good_image_url(url: str) -> bool:
 
 
 def get_all_used_thumbnail_urls(session) -> set[str]:
+    """processed_news에 이미 저장된 이미지 URL만 중복 체크 대상으로 사용"""
     used = set()
 
     processed_rows = (
@@ -194,22 +244,11 @@ def get_all_used_thumbnail_urls(session) -> set[str]:
         if u:
             used.add(_norm_url(u))
 
-    past_rows = (
-        session.query(PastNews.thumbnail_url)
-        .filter(
-            PastNews.thumbnail_url.is_not(None),
-            PastNews.thumbnail_url != "",
-        )
-        .all()
-    )
-    for (u,) in past_rows:
-        if u:
-            used.add(_norm_url(u))
-
     return used
 
 
 def get_used_urls_for_artist(session, artist_name: str) -> set[str]:
+    """같은 아티스트가 processed_news에서 이미 사용한 이미지 URL만 수집"""
     name = (artist_name or "").strip()
     if not name:
         return set()
@@ -217,19 +256,6 @@ def get_used_urls_for_artist(session, artist_name: str) -> set[str]:
     used = set()
 
     rows = (
-        session.query(PastNews.thumbnail_url)
-        .filter(
-            PastNews.artist_name.ilike(name),
-            PastNews.thumbnail_url.is_not(None),
-            PastNews.thumbnail_url != "",
-        )
-        .all()
-    )
-    for (u,) in rows:
-        if u:
-            used.add(_norm_url(u))
-
-    p_rows = (
         session.query(ProcessedNews.artist_tags, ProcessedNews.thumbnail_url)
         .filter(
             ProcessedNews.thumbnail_url.is_not(None),
@@ -237,7 +263,7 @@ def get_used_urls_for_artist(session, artist_name: str) -> set[str]:
         )
         .all()
     )
-    for tags, thumb in p_rows:
+    for tags, thumb in rows:
         arr = _loads_maybe(tags)
         arr = [str(x).strip().lower() for x in arr]
         if name.lower() in arr and thumb:
@@ -380,18 +406,6 @@ def build_query_for_processed(article) -> tuple[str, str]:
     return "kpop idol official photo", ""
 
 
-def build_query_for_past(article) -> tuple[str, str]:
-    artist_name = (getattr(article, "artist_name", None) or "").strip()
-    if artist_name:
-        return f"{artist_name} official photo", artist_name
-
-    title = (getattr(article, "title", None) or "").strip()
-    if title:
-        return title[:80], ""
-
-    return "kpop artist official photo", ""
-
-
 def fetch_images_for_processed(session, sleep_sec: float = 1.5, headless: bool = True):
     articles = (
         session.query(ProcessedNews)
@@ -438,57 +452,11 @@ def fetch_images_for_processed(session, sleep_sec: float = 1.5, headless: bool =
     print(f"\n[processed_news] 완료: {success}/{len(articles)}건 성공")
 
 
-def fetch_images_for_past(session, sleep_sec: float = 1.5, headless: bool = True):
-    articles = (
-        session.query(PastNews)
-        .filter(
-            or_(PastNews.thumbnail_url.is_(None), PastNews.thumbnail_url == "")
-        )
-        .all()
-    )
-
-    print(f"\n[past_news] 총 {len(articles)}건 이미지 처리 시작")
-
-    success = 0
-    failed = 0
-
-    for article in articles:
-        query, artist_name = build_query_for_past(article)
-
-        print(f"\n[past_news] 처리 중 ID={article.id}")
-        print(f"  - 검색어: {query}")
-
-        image_url = pick_non_duplicate_bing_image(
-            session,
-            query,
-            artist_name=artist_name,
-            headless=headless,
-        )
-
-        if image_url:
-            try:
-                article.thumbnail_url = image_url
-                session.commit()
-                success += 1
-                print(f"  - 성공: {image_url}")
-            except SQLAlchemyError as e:
-                session.rollback()
-                failed += 1
-                print(f"  - DB 저장 실패: {e}")
-        else:
-            failed += 1
-            print("  - 실패: 적합한 이미지 없음")
-
-        time.sleep(sleep_sec)
-
-    print(f"\n[past_news] 완료: {success}/{len(articles)}건 성공")
-
-
-def fetch_all_images(headless: bool = True):
+def fetch_processed_images_only(headless: bool = True):
+    """processed_news의 thumbnail_url만 채운다. past_news는 건드리지 않는다."""
     with get_session() as session:
         fetch_images_for_processed(session, headless=headless)
-        fetch_images_for_past(session, headless=headless)
 
 
 if __name__ == "__main__":
-    fetch_all_images(headless=True)
+    fetch_processed_images_only(headless=True)
