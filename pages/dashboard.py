@@ -1,10 +1,20 @@
+"""
+streamlit_app.py — 뉴스 대시보드 UI
+실행: streamlit run streamlit_app.py
+"""
+
 import sqlite3
 import json
 import streamlit as st
 from rag_search import build_graph, NewsState
 from database import SessionLocal, ProcessedNews
 import re
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from components.styles import apply_styles
+apply_styles()
 # ── 페이지 설정 ──
 st.set_page_config(
     page_title="K-엔터 뉴스 브리핑",
